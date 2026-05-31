@@ -1,0 +1,9 @@
+# supervisor_node에게 상태 변경을 요청합니다.
+# command 예시: idle, search, approach, follow, stop
+string command
+---
+# accepted가 true이면 요청을 받아들였다는 뜻입니다.
+bool accepted
+
+# 사람이 읽기 쉬운 결과 설명입니다.
+string message

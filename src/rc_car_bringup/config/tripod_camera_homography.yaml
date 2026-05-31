@@ -1,0 +1,11 @@
+# This file is a placeholder.
+# Replace the matrix after measuring at least four floor points.
+#
+# A homography converts:
+#   camera pixel point  ->  map meter point
+#
+# Until calibration is done, this identity-like matrix is not useful for real driving.
+homography:
+  - [1.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0]
+  - [0.0, 0.0, 1.0]

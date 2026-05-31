@@ -1,0 +1,9 @@
+# YOLO dataset file for Ultralytics.
+# Put images and labels in the folders below, then train YOLOv8n.
+
+path: /home/rokey/mini1_ws/src/rc_car_bringup/datasets/rc_car
+train: images/train
+val: images/val
+
+names:
+  0: rc_car

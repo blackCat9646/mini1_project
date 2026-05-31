@@ -1,0 +1,65 @@
+supervisor_node:
+  ros__parameters:
+    state_topic: /rc_car/system_state
+    set_state_service: /rc_car/set_state
+
+tripod_trigger_node:
+  ros__parameters:
+    device_id: 2
+    model_path: /home/rokey/mini1_ws/yolov8n.pt
+    device: auto
+    confidence_threshold: 0.35
+    required_consecutive_detections: 5
+    allowed_consecutive_misses: 10
+    frame_rate: 10.0
+    image_width: 640
+    image_height: 480
+    show_window: false
+    detected_topic: /rc_car/webcam_detected
+
+tripod_yolo_node:
+  ros__parameters:
+    image_topic: /tripod/image_raw
+    target_topic: /rc_car/target/tripod_2d
+    model_path: /home/rokey/mini1_ws/src/rc_car_bringup/datasets/rc_car/runs/detect/train/weights/best.pt
+    target_class_name: rc_car
+    confidence_threshold: 0.45
+
+pixel_to_map_node:
+  ros__parameters:
+    input_topic: /rc_car/target/tripod_2d
+    output_topic: /rc_car/target/map
+    homography_file: /home/rokey/mini1_ws/src/rc_car_bringup/config/tripod_camera_homography.yaml
+
+approach_planner_node:
+  ros__parameters:
+    trigger_topic: /rc_car/webcam_detected
+    waypoint_file: /home/rokey/mini1_ws/src/rc_car_bringup/config/watch_area_waypoint.yaml
+    navigate_action: /robot3/navigate_to_pose
+    rearm_when_trigger_is_false: true
+
+oakd_yolo_depth_node:
+  ros__parameters:
+    rgb_topic: /robot3/oakd/rgb/preview/image_raw
+    depth_topic: /robot3/oakd/stereo/image_raw
+    target_topic: /rc_car/target/oakd_3d
+    model_path: /home/rokey/mini1_ws/yolov8n.pt
+    device: auto
+    target_class_name: car
+    confidence_threshold: 0.35
+    horizontal_fov_deg: 69.0
+    inference_rate: 5.0
+    depth_sample_radius: 4
+
+follow_controller_node:
+  ros__parameters:
+    target_topic: /rc_car/target/oakd_3d
+    scan_topic: /robot3/scan
+    cmd_vel_topic: /robot3/cmd_vel
+    follow_enabled: false
+    desired_distance: 0.70
+    stop_distance: 0.70
+    front_safety_distance: 0.30
+    target_timeout_sec: 1.0
+    max_linear_speed: 0.08
+    max_angular_speed: 0.40

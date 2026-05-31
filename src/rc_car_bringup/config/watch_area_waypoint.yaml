@@ -1,0 +1,23 @@
+# 관찰 지점 waypoint 설정
+#
+# 목적:
+#   고정 웹캠이 RC카를 발견했을 때 TurtleBot4가 먼저 이동할 위치
+#
+# 좌표 기준:
+#   frame_id: map
+#   x, y 단위: meter
+#   yaw 단위: radian
+#
+# 좌표 확인 방법:
+#   RViz의 Publish Point 도구로 감시 구역 근처를 클릭
+#   /clicked_point 토픽에서 x, y 값 확인
+#
+# yaw 값:
+#   로봇이 도착 후 바라볼 방향
+#   처음에는 0.0 사용 후 실제 방향에 맞게 조정
+
+watch_area:
+  frame_id: map
+  x: -1.628544569015503
+  y: 1.994612455368042
+  yaw: 0.0
