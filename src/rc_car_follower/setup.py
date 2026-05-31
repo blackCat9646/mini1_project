@@ -29,6 +29,7 @@ setup(
             'approach_planner_node = rc_car_follower.approach_planner_node:main',
             'oakd_yolo_depth_node = rc_car_follower.oakd_yolo_depth_node:main',
             'follow_controller_node = rc_car_follower.follow_controller_node:main',
+            'nav2_target_tracker_node = rc_car_follower.nav2_target_tracker_node:main',
             'supervisor_node = rc_car_follower.supervisor_node:main',
             'tripod_trigger_node = rc_car_follower.tripod_trigger_node:main',
             'webcam_car_test = rc_car_follower.webcam_car_test:main',

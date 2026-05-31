@@ -4,6 +4,7 @@ import math
 
 import rclpy
 import yaml
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
@@ -29,12 +30,16 @@ class ApproachPlannerNode(Node):
         # TurtleBot4 Nav2 action 이름
         self.declare_parameter('navigate_action', '/robot3/navigate_to_pose')
 
+        # Nav2 기반 OAK-D 추적 켜기/끄기 토픽
+        self.declare_parameter('tracking_enable_topic', '/rc_car/nav2_tracking_enabled')
+
         # goal 완료 후 trigger가 다시 false가 되었을 때 재출발 허용 여부
         self.declare_parameter('rearm_when_trigger_is_false', True)
 
         trigger_topic = self.get_parameter('trigger_topic').value
         waypoint_file = self.get_parameter('waypoint_file').value
         navigate_action = self.get_parameter('navigate_action').value
+        tracking_enable_topic = self.get_parameter('tracking_enable_topic').value
 
         self._rearm_when_trigger_is_false = bool(
             self.get_parameter('rearm_when_trigger_is_false').value
@@ -51,11 +56,24 @@ class ApproachPlannerNode(Node):
         self._last_trigger_value = False
 
         self._action_client = ActionClient(self, NavigateToPose, navigate_action)
+        self._tracking_enable_publisher = self.create_publisher(
+            Bool,
+            tracking_enable_topic,
+            10,
+        )
         self.create_subscription(Bool, trigger_topic, self._on_trigger, 10)
 
         self.get_logger().info(f'웹캠 trigger 토픽: {trigger_topic}')
         self.get_logger().info(f'관찰 지점 waypoint 파일: {waypoint_file}')
         self.get_logger().info(f'Nav2 이동 action: {navigate_action}')
+        self.get_logger().info(f'OAK-D Nav2 추적 enable 토픽: {tracking_enable_topic}')
+
+    def _publish_tracking_enabled(self, enabled):
+        """OAK-D Nav2 추적 시작/정지 신호 발행."""
+        message = Bool()
+        message.data = enabled
+        self._tracking_enable_publisher.publish(message)
+        self.get_logger().info(f'OAK-D Nav2 추적 enable: {enabled}')
 
     def _load_watch_area_waypoint(self, waypoint_file):
         """관찰 지점 waypoint 파일 읽기."""
@@ -138,6 +156,7 @@ class ApproachPlannerNode(Node):
 
         self._goal_in_progress = True
         self._goal_sent = True
+        self._publish_tracking_enabled(False)
         self._action_client.wait_for_server()
         goal_future = self._action_client.send_goal_async(goal)
         goal_future.add_done_callback(self._on_goal_response)
@@ -159,6 +178,7 @@ class ApproachPlannerNode(Node):
         status = future.result().status
         self.get_logger().info(f'Nav2 goal 종료 상태: {status}')
         self._goal_in_progress = False
+        self._publish_tracking_enabled(status == GoalStatus.STATUS_SUCCEEDED)
 
 
 def main():

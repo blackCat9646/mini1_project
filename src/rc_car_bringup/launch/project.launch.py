@@ -111,8 +111,8 @@ def generate_launch_description():
         ),
         Node(
             package='rc_car_follower',
-            executable='follow_controller_node',
-            name='follow_controller_node',
+            executable='nav2_target_tracker_node',
+            name='nav2_target_tracker_node',
             output='screen',
             parameters=[LaunchConfiguration('project_params_file')],
         ),
