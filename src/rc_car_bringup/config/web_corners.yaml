@@ -1,0 +1,21 @@
+corners:
+  corner_1:
+    frame_id: map
+    x: -2.20
+    y: -0.60
+    yaw: 0.0
+  corner_2:
+    frame_id: map
+    x: 0.00
+    y: -0.60
+    yaw: 1.57
+  corner_3:
+    frame_id: map
+    x: 0.00
+    y: 2.20
+    yaw: 3.14
+  corner_4:
+    frame_id: map
+    x: -2.20
+    y: 2.20
+    yaw: -1.57

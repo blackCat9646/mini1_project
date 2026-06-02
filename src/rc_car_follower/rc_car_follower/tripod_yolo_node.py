@@ -1,13 +1,15 @@
-"""Detect the RC car from the fixed tripod camera.
+"""삼각대 카메라 YOLO 2D 감지 노드.
 
-Input:
-  /tripod/image_raw      sensor_msgs/Image
+입력:
+  /tripod/image_raw            삼각대 카메라 영상
 
-Output:
-  /rc_car/target/tripod_2d   rc_car_interfaces/Target2D
+출력:
+  /rc_car/target/tripod_2d     RC카 2D 위치
 
-This node only answers one question:
-  "Where is the RC car in the tripod camera image?"
+역할:
+  1. 삼각대 영상 수신
+  2. YOLO RC카 감지
+  3. 화면 속 RC카 중심 좌표 발행
 """
 
 import rclpy
@@ -20,15 +22,24 @@ from rc_car_follower.yolo_helper import biggest_box, load_yolo_model
 
 
 class TripodYoloNode(Node):
-    """YOLO detector for the camera mounted on a tripod."""
+    """삼각대 카메라용 YOLO 감지 노드."""
 
     def __init__(self):
         super().__init__('tripod_yolo_node')
 
+        # 입력 영상 토픽
         self.declare_parameter('image_topic', '/tripod/image_raw')
+
+        # 2D 감지 결과 토픽
         self.declare_parameter('target_topic', '/rc_car/target/tripod_2d')
+
+        # YOLO 모델 경로
         self.declare_parameter('model_path', '')
+
+        # 찾을 클래스 이름
         self.declare_parameter('target_class_name', 'rc_car')
+
+        # 최소 신뢰도
         self.declare_parameter('confidence_threshold', 0.45)
 
         image_topic = self.get_parameter('image_topic').value
@@ -37,17 +48,25 @@ class TripodYoloNode(Node):
 
         self._target_class_name = self.get_parameter('target_class_name').value
         self._confidence_threshold = self.get_parameter('confidence_threshold').value
+
+        # ROS Image와 OpenCV 이미지 변환 도구
         self._bridge = CvBridge()
+
+        # YOLO 모델 로딩
         self._model = load_yolo_model(self, model_path)
 
+        # 2D target 발행자
         self._publisher = self.create_publisher(Target2D, target_topic, 10)
+
+        # 삼각대 영상 구독자
         self.create_subscription(Image, image_topic, self._on_image, 10)
 
-        self.get_logger().info(f'Subscribed tripod image: {image_topic}')
-        self.get_logger().info(f'Publishing tripod target: {target_topic}')
+        self.get_logger().info(f'삼각대 영상 구독 토픽: {image_topic}')
+        self.get_logger().info(f'삼각대 감지 결과 발행 토픽: {target_topic}')
 
     def _empty_detection(self, image_msg):
-        """Create a message that clearly says: no RC car was found."""
+        """미감지 메시지 생성."""
+        # 기본값: 감지 안 됨
         target = Target2D()
         target.header = image_msg.header
         target.detected = False
@@ -58,16 +77,24 @@ class TripodYoloNode(Node):
         return target
 
     def _on_image(self, image_msg):
+        # 기본 미감지 결과 생성
         target = self._empty_detection(image_msg)
 
+        # YOLO 모델 없음 처리
         if self._model is None:
             self._publisher.publish(target)
             return
 
+        # ROS Image의 OpenCV 이미지 변환
         frame = self._bridge.imgmsg_to_cv2(image_msg, desired_encoding='bgr8')
+
+        # YOLO 추론
         results = self._model.predict(frame, verbose=False)
+
+        # 가장 큰 target 박스 선택
         box = biggest_box(results[0], self._target_class_name)
 
+        # 신뢰도 기준 통과 시 감지 결과 작성
         if box and box['confidence'] >= self._confidence_threshold:
             target.detected = True
             target.class_name = box['class_name']
@@ -78,6 +105,7 @@ class TripodYoloNode(Node):
             target.width = box['width']
             target.height = box['height']
 
+        # 2D 감지 결과 발행
         self._publisher.publish(target)
 
 

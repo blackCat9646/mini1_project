@@ -11,8 +11,10 @@
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rc_car_web</exec_depend>
   <exec_depend>rc_car_follower</exec_depend>
   <exec_depend>rc_car_interfaces</exec_depend>
+  <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>turtlebot4_navigation</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>

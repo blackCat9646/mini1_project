@@ -16,6 +16,8 @@ tripod_trigger_node:
     image_height: 480
     show_window: false
     detected_topic: /rc_car/webcam_detected
+    debug_image_topic: /rc_car/debug/tripod_image
+    debug_compressed_image_topic: /rc_car/debug/tripod_image/compressed
 
 tripod_yolo_node:
   ros__parameters:
@@ -36,6 +38,7 @@ approach_planner_node:
     trigger_topic: /rc_car/webcam_detected
     waypoint_file: /home/rokey/mini1_ws/src/rc_car_bringup/config/watch_area_waypoint.yaml
     navigate_action: /robot3/navigate_to_pose
+    tracking_enable_topic: /rc_car/nav2_tracking_enabled
     rearm_when_trigger_is_false: true
 
 oakd_yolo_depth_node:
@@ -48,8 +51,10 @@ oakd_yolo_depth_node:
     target_class_name: car
     confidence_threshold: 0.35
     horizontal_fov_deg: 69.0
-    inference_rate: 5.0
+    inference_rate: 2.0
     depth_sample_radius: 4
+    debug_image_topic: /rc_car/debug/oakd_image
+    debug_compressed_image_topic: /rc_car/debug/oakd_image/compressed
 
 follow_controller_node:
   ros__parameters:
@@ -63,3 +68,18 @@ follow_controller_node:
     target_timeout_sec: 1.0
     max_linear_speed: 0.08
     max_angular_speed: 0.40
+
+nav2_target_tracker_node:
+  ros__parameters:
+    target_topic: /rc_car/target/oakd_3d
+    enable_topic: /rc_car/nav2_tracking_enabled
+    navigate_action: /robot3/navigate_to_pose
+    map_frame: map
+    robot_frame: base_link
+    tracking_enabled: false
+    desired_distance: 0.70
+    stop_distance: 0.70
+    approach_margin: 0.15
+    target_timeout_sec: 1.0
+    goal_update_period: 1.0
+    goal_change_distance: 0.20

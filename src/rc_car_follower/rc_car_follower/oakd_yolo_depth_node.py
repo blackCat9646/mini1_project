@@ -17,12 +17,13 @@
 import math
 
 import numpy as np
+import cv2
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Point
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 
 from rc_car_interfaces.msg import Target3D
 from rc_car_follower.yolo_helper import biggest_box, load_yolo_model, resolve_yolo_device
@@ -45,10 +46,19 @@ class OakdYoloDepthNode(Node):
         self.declare_parameter('horizontal_fov_deg', 69.0)
         self.declare_parameter('inference_rate', 5.0)
         self.declare_parameter('depth_sample_radius', 4)
+        self.declare_parameter('debug_image_topic', '/rc_car/debug/oakd_image')
+        self.declare_parameter(
+            'debug_compressed_image_topic',
+            '/rc_car/debug/oakd_image/compressed',
+        )
 
         rgb_topic = self.get_parameter('rgb_topic').value
         depth_topic = self.get_parameter('depth_topic').value
         target_topic = self.get_parameter('target_topic').value
+        debug_image_topic = self.get_parameter('debug_image_topic').value
+        debug_compressed_image_topic = self.get_parameter(
+            'debug_compressed_image_topic'
+        ).value
         model_path = self.get_parameter('model_path').value
 
         self._device = resolve_yolo_device(self, self.get_parameter('device').value)
@@ -75,6 +85,12 @@ class OakdYoloDepthNode(Node):
         timer_period = 1.0 / max(inference_rate, 0.1)
 
         self._publisher = self.create_publisher(Target3D, target_topic, 10)
+        self._debug_image_publisher = self.create_publisher(Image, debug_image_topic, 10)
+        self._debug_compressed_image_publisher = self.create_publisher(
+            CompressedImage,
+            debug_compressed_image_topic,
+            10,
+        )
         self.create_subscription(Image, rgb_topic, self._on_rgb_image, image_qos)
         self.create_subscription(Image, depth_topic, self._on_depth_image, image_qos)
         self.create_timer(timer_period, self._process_latest_rgb_image)
@@ -82,6 +98,10 @@ class OakdYoloDepthNode(Node):
         self.get_logger().info(f'OAK-D RGB 구독 토픽: {rgb_topic}')
         self.get_logger().info(f'OAK-D Depth 구독 토픽: {depth_topic}')
         self.get_logger().info(f'OAK-D 감지 결과 발행 토픽: {target_topic}')
+        self.get_logger().info(f'OAK-D 디버그 화면 토픽: {debug_image_topic}')
+        self.get_logger().info(
+            f'OAK-D 압축 디버그 화면 토픽: {debug_compressed_image_topic}'
+        )
         self.get_logger().info(f'YOLO 추론 주기: {inference_rate:.1f} Hz')
         self.get_logger().info('카메라 QoS: BEST_EFFORT, queue 1')
 
@@ -172,10 +192,14 @@ class OakdYoloDepthNode(Node):
 
         # YOLO car 감지
         results = self._model.predict(frame, device=self._device, verbose=False)
+        debug_frame = results[0].plot()
         box = biggest_box(results[0], self._target_class_name)
 
         # 미감지 또는 낮은 신뢰도 처리
         if not box or box['confidence'] < self._confidence_threshold:
+            self._draw_debug_text(debug_frame, 'WAITING')
+            self._publish_debug_image(debug_frame, rgb_msg)
+            self._publish_debug_compressed_image(debug_frame, rgb_msg)
             self._publisher.publish(target)
             return
 
@@ -187,6 +211,9 @@ class OakdYoloDepthNode(Node):
             image_height,
         )
         if distance is None:
+            self._draw_debug_text(debug_frame, 'NO DEPTH')
+            self._publish_debug_image(debug_frame, rgb_msg)
+            self._publish_debug_compressed_image(debug_frame, rgb_msg)
             self._publisher.publish(target)
             return
 
@@ -207,7 +234,39 @@ class OakdYoloDepthNode(Node):
             y=distance * math.sin(yaw_error),
             z=0.0,
         )
+        self._draw_debug_text(debug_frame, f'DETECTED {distance:.2f} m')
+        self._publish_debug_image(debug_frame, rgb_msg)
+        self._publish_debug_compressed_image(debug_frame, rgb_msg)
         self._publisher.publish(target)
+
+    def _draw_debug_text(self, frame, text):
+        """디버그 화면 상태 글자 표시."""
+        cv2.putText(
+            frame,
+            text,
+            (16, 34),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 220, 0),
+            2,
+        )
+
+    def _publish_debug_image(self, frame, rgb_msg):
+        """디버그 화면 이미지 발행."""
+        image_msg = self._bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+        image_msg.header.stamp = rgb_msg.header.stamp
+        image_msg.header.frame_id = rgb_msg.header.frame_id
+        self._debug_image_publisher.publish(image_msg)
+
+    def _publish_debug_compressed_image(self, frame, rgb_msg):
+        """디버그 화면 압축 이미지 발행."""
+        compressed_msg = self._bridge.cv2_to_compressed_imgmsg(
+            frame,
+            dst_format='jpg',
+        )
+        compressed_msg.header.stamp = rgb_msg.header.stamp
+        compressed_msg.header.frame_id = rgb_msg.header.frame_id
+        self._debug_compressed_image_publisher.publish(compressed_msg)
 
 
 def main():

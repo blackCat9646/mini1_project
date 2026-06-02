@@ -4,7 +4,9 @@ import time
 
 import cv2
 import rclpy
+from cv_bridge import CvBridge
 from rclpy.node import Node
+from sensor_msgs.msg import CompressedImage, Image
 from std_msgs.msg import Bool
 
 from rc_car_follower.yolo_helper import resolve_yolo_device
@@ -49,6 +51,15 @@ class TripodTriggerNode(Node):
         # RC카 등장 신호 토픽
         self.declare_parameter('detected_topic', '/rc_car/webcam_detected')
 
+        # 디버깅용 웹캠 YOLO 화면 토픽
+        self.declare_parameter('debug_image_topic', '/rc_car/debug/tripod_image')
+
+        # 디버깅용 압축 웹캠 YOLO 화면 토픽
+        self.declare_parameter(
+            'debug_compressed_image_topic',
+            '/rc_car/debug/tripod_image/compressed',
+        )
+
         self._device_id = int(self.get_parameter('device_id').value)
         self._model_path = self.get_parameter('model_path').value
         self._device = resolve_yolo_device(self, self.get_parameter('device').value)
@@ -60,6 +71,13 @@ class TripodTriggerNode(Node):
         self._image_height = int(self.get_parameter('image_height').value)
         self._show_window = bool(self.get_parameter('show_window').value)
         detected_topic = self.get_parameter('detected_topic').value
+        debug_image_topic = self.get_parameter('debug_image_topic').value
+        debug_compressed_image_topic = self.get_parameter(
+            'debug_compressed_image_topic'
+        ).value
+
+        # ROS 이미지 변환 도구
+        self._bridge = CvBridge()
 
         # 연속 감지 성공 횟수
         self._consecutive_detect_count = 0
@@ -76,11 +94,21 @@ class TripodTriggerNode(Node):
         self._model = self._load_yolo_model()
         self._camera = self._open_camera()
         self._publisher = self.create_publisher(Bool, detected_topic, 10)
+        self._debug_image_publisher = self.create_publisher(Image, debug_image_topic, 10)
+        self._debug_compressed_image_publisher = self.create_publisher(
+            CompressedImage,
+            debug_compressed_image_topic,
+            10,
+        )
 
         timer_period = 1.0 / max(self._frame_rate, 1.0)
         self.create_timer(timer_period, self._timer_callback)
 
         self.get_logger().info(f'웹캠 감지 신호 토픽: {detected_topic}')
+        self.get_logger().info(f'웹캠 디버그 화면 토픽: {debug_image_topic}')
+        self.get_logger().info(
+            f'웹캠 압축 디버그 화면 토픽: {debug_compressed_image_topic}'
+        )
         self.get_logger().info(f'웹캠 장치 번호: /dev/video{self._device_id}')
 
     def _load_yolo_model(self):
@@ -131,14 +159,17 @@ class TripodTriggerNode(Node):
             self._publish_detected(False)
             return
 
-        car_detected = self._detect_car(frame)
+        car_detected, debug_frame = self._detect_car(frame)
         self._update_trigger_state(car_detected)
         self._publish_detected(self._detected_now)
-        self._show_debug_window(frame)
+        self._draw_state_text(debug_frame)
+        self._publish_debug_image(debug_frame)
+        self._publish_debug_compressed_image(debug_frame)
+        self._show_debug_window(debug_frame)
         self._log_state()
 
     def _detect_car(self, frame):
-        """YOLO car 감지 판단."""
+        """YOLO car 감지 판단 및 표시 화면 생성."""
         results = self._model.predict(
             frame,
             classes=[self.COCO_CAR_CLASS_ID],
@@ -147,7 +178,10 @@ class TripodTriggerNode(Node):
             verbose=False,
         )
 
-        return len(results[0].boxes) > 0
+        # YOLO 박스가 그려진 화면
+        debug_frame = results[0].plot()
+
+        return len(results[0].boxes) > 0, debug_frame
 
     def _update_trigger_state(self, car_detected):
         """연속 감지와 연속 미감지 기준 적용."""
@@ -166,11 +200,8 @@ class TripodTriggerNode(Node):
         if self._consecutive_miss_count >= self._allowed_miss_count:
             self._detected_now = False
 
-    def _show_debug_window(self, frame):
-        """디버깅용 웹캠 화면."""
-        if not self._show_window:
-            return
-
+    def _draw_state_text(self, frame):
+        """디버깅용 상태 글자 표시."""
         status_text = 'DETECTED' if self._detected_now else 'WAITING'
         cv2.putText(
             frame,
@@ -181,6 +212,29 @@ class TripodTriggerNode(Node):
             (0, 220, 0),
             2,
         )
+
+    def _publish_debug_image(self, frame):
+        """디버깅용 웹캠 화면 발행."""
+        image_msg = self._bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+        image_msg.header.stamp = self.get_clock().now().to_msg()
+        image_msg.header.frame_id = 'tripod_camera'
+        self._debug_image_publisher.publish(image_msg)
+
+    def _publish_debug_compressed_image(self, frame):
+        """디버깅용 압축 웹캠 화면 발행."""
+        compressed_msg = self._bridge.cv2_to_compressed_imgmsg(
+            frame,
+            dst_format='jpg',
+        )
+        compressed_msg.header.stamp = self.get_clock().now().to_msg()
+        compressed_msg.header.frame_id = 'tripod_camera'
+        self._debug_compressed_image_publisher.publish(compressed_msg)
+
+    def _show_debug_window(self, frame):
+        """디버깅용 웹캠 창 표시."""
+        if not self._show_window:
+            return
+
         cv2.imshow('tripod_trigger_node', frame)
         cv2.waitKey(1)
 

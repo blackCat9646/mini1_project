@@ -11,16 +11,19 @@ from pathlib import Path
 
 def load_yolo_model(node, model_path):
     """YOLO 모델 로딩."""
+    # 모델 경로 없음 처리
     if not model_path:
         node.get_logger().warn('model_path 비어 있음')
         return None
 
     try:
+        # ultralytics YOLO import
         from ultralytics import YOLO
     except ImportError:
         node.get_logger().warn('ultralytics 패키지 없음')
         return None
 
+    # 사용자 홈 경로 해석
     model_file = Path(model_path).expanduser()
 
     # 직접 만든 best.pt 같은 파일 경로 확인
@@ -34,6 +37,7 @@ def load_yolo_model(node, model_path):
         model_source = model_path
 
     try:
+        # YOLO 모델 객체 생성
         model = YOLO(model_source)
     except Exception as error:
         node.get_logger().warn(f'YOLO 모델 로딩 실패: {error}')
@@ -45,48 +49,63 @@ def load_yolo_model(node, model_path):
 
 def resolve_yolo_device(node, requested_device):
     """YOLO 추론 장치 선택."""
+    # 사용자가 직접 지정한 장치 사용
     if requested_device != 'auto':
         node.get_logger().info(f'YOLO 추론 장치: {requested_device}')
         return requested_device
 
     try:
+        # PyTorch CUDA 확인용 import
         import torch
     except ImportError:
         node.get_logger().info('YOLO 추론 장치: cpu')
         return 'cpu'
 
+    # CUDA 가능 시 GPU 0번 사용
     if torch.cuda.is_available():
         device_name = torch.cuda.get_device_name(0)
         node.get_logger().info(f'YOLO 추론 장치: cuda:0 ({device_name})')
         return 0
 
+    # CUDA 불가 시 CPU 사용
     node.get_logger().info('YOLO 추론 장치: cpu')
     return 'cpu'
 
 
 def biggest_box(result, target_class_name='rc_car'):
     """가장 큰 YOLO 박스 선택."""
+    # class id와 class name 대응표
     names = result.names
+
+    # 현재까지 가장 좋은 박스
     best = None
     best_area = 0.0
 
     for box in result.boxes:
+        # 감지 class 이름 확인
         class_id = int(box.cls[0])
         class_name = names.get(class_id, str(class_id))
         if class_name != target_class_name:
             continue
 
+        # YOLO 박스 좌표 읽기
         x1, y1, x2, y2 = [float(value) for value in box.xyxy[0]]
+
+        # 박스 크기 계산
         width = x2 - x1
         height = y2 - y1
         area = width * height
+
+        # 더 작은 박스 무시
         if area <= best_area:
             continue
 
+        # YOLO tracking id 기본값
         track_id = -1
         if box.id is not None:
             track_id = int(box.id[0])
 
+        # 가장 큰 박스 정보 저장
         best_area = area
         best = {
             'class_name': class_name,

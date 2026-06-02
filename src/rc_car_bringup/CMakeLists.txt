@@ -15,6 +15,7 @@ install(DIRECTORY
   launch
   maps
   rviz
+  web
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -115,6 +115,10 @@ def generate_launch_description():
             name='nav2_target_tracker_node',
             output='screen',
             parameters=[LaunchConfiguration('project_params_file')],
+            remappings=[
+                ('/tf', '/robot3/tf'),
+                ('/tf_static', '/robot3/tf_static'),
+            ],
         ),
     ]
 
