@@ -15,10 +15,21 @@
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
 from sensor_msgs.msg import Image
 
 from rc_car_interfaces.msg import Target2D
-from rc_car_follower.yolo_helper import biggest_box, load_yolo_model
+from rc_car_follower.yolo_helper import (
+    biggest_box,
+    class_ids_for_name,
+    load_yolo_model,
+    resolve_yolo_device,
+)
 
 
 class TripodYoloNode(Node):
@@ -36,8 +47,11 @@ class TripodYoloNode(Node):
         # YOLO 모델 경로
         self.declare_parameter('model_path', '')
 
+        # YOLO 추론 장치
+        self.declare_parameter('device', 'auto')
+
         # 찾을 클래스 이름
-        self.declare_parameter('target_class_name', 'rc_car')
+        self.declare_parameter('target_class_name', 'car')
 
         # 최소 신뢰도
         self.declare_parameter('confidence_threshold', 0.45)
@@ -46,23 +60,43 @@ class TripodYoloNode(Node):
         target_topic = self.get_parameter('target_topic').value
         model_path = self.get_parameter('model_path').value
 
+        self._device = resolve_yolo_device(
+            self,
+            self.get_parameter('device').value,
+        )
         self._target_class_name = self.get_parameter('target_class_name').value
-        self._confidence_threshold = self.get_parameter('confidence_threshold').value
+        self._confidence_threshold = self.get_parameter(
+            'confidence_threshold'
+        ).value
 
         # ROS Image와 OpenCV 이미지 변환 도구
         self._bridge = CvBridge()
 
         # YOLO 모델 로딩
         self._model = load_yolo_model(self, model_path)
+        self._target_class_ids = class_ids_for_name(
+            self,
+            self._model,
+            self._target_class_name,
+        )
 
         # 2D target 발행자
         self._publisher = self.create_publisher(Target2D, target_topic, 10)
 
+        # 카메라용 최신 프레임 QoS
+        image_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+
         # 삼각대 영상 구독자
-        self.create_subscription(Image, image_topic, self._on_image, 10)
+        self.create_subscription(Image, image_topic, self._on_image, image_qos)
 
         self.get_logger().info(f'삼각대 영상 구독 토픽: {image_topic}')
         self.get_logger().info(f'삼각대 감지 결과 발행 토픽: {target_topic}')
+        self.get_logger().info('카메라 QoS: BEST_EFFORT, queue 1')
 
     def _empty_detection(self, image_msg):
         """미감지 메시지 생성."""
@@ -89,7 +123,13 @@ class TripodYoloNode(Node):
         frame = self._bridge.imgmsg_to_cv2(image_msg, desired_encoding='bgr8')
 
         # YOLO 추론
-        results = self._model.predict(frame, verbose=False)
+        results = self._model.predict(
+            frame,
+            classes=self._target_class_ids,
+            conf=self._confidence_threshold,
+            device=self._device,
+            verbose=False,
+        )
 
         # 가장 큰 target 박스 선택
         box = biggest_box(results[0], self._target_class_name)

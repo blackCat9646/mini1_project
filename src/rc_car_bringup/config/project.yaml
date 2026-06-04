@@ -1,3 +1,6 @@
+# 강의실 공유 Wi-Fi 보호 기준:
+# 영상 디버그 토픽은 기본으로 끄고, rqt 확인이 꼭 필요할 때만 true로 바꿉니다.
+
 supervisor_node:
   ros__parameters:
     state_topic: /rc_car/system_state
@@ -5,16 +8,23 @@ supervisor_node:
 
 tripod_trigger_node:
   ros__parameters:
+    # 가능하면 /dev/video2 대신 /dev/v4l/by-id/... 값을 넣습니다.
+    # auto는 보이는 카메라 중 열리는 장치를 선택합니다.
+    # 빈 값이면 device_id를 fallback으로 사용합니다.
+    camera_device: auto
     device_id: 2
-    model_path: /home/rokey/mini1_ws/yolov8n.pt
+    model_path: /home/rokey/mini1_ws/src/rc_car_bringup/models/tripod_cam.pt
     device: auto
-    confidence_threshold: 0.35
-    required_consecutive_detections: 5
-    allowed_consecutive_misses: 10
-    frame_rate: 10.0
+    target_class_name: car
+    confidence_threshold: 0.45
+    required_consecutive_detections: 3
+    allowed_consecutive_misses: 5
+    frame_rate: 5.0
     image_width: 640
     image_height: 480
     show_window: false
+    publish_debug_image: false
+    publish_debug_compressed_image: false
     detected_topic: /rc_car/webcam_detected
     debug_image_topic: /rc_car/debug/tripod_image
     debug_compressed_image_topic: /rc_car/debug/tripod_image/compressed
@@ -23,8 +33,9 @@ tripod_yolo_node:
   ros__parameters:
     image_topic: /tripod/image_raw
     target_topic: /rc_car/target/tripod_2d
-    model_path: /home/rokey/mini1_ws/src/rc_car_bringup/datasets/rc_car/runs/detect/train/weights/best.pt
-    target_class_name: rc_car
+    model_path: /home/rokey/mini1_ws/src/rc_car_bringup/models/tripod_cam.pt
+    device: auto
+    target_class_name: car
     confidence_threshold: 0.45
 
 pixel_to_map_node:
@@ -36,6 +47,7 @@ pixel_to_map_node:
 approach_planner_node:
   ros__parameters:
     trigger_topic: /rc_car/webcam_detected
+    return_topic: /rc_car/return_to_watch_area
     waypoint_file: /home/rokey/mini1_ws/src/rc_car_bringup/config/watch_area_waypoint.yaml
     navigate_action: /robot3/navigate_to_pose
     tracking_enable_topic: /rc_car/nav2_tracking_enabled
@@ -46,13 +58,15 @@ oakd_yolo_depth_node:
     rgb_topic: /robot3/oakd/rgb/preview/image_raw
     depth_topic: /robot3/oakd/stereo/image_raw
     target_topic: /rc_car/target/oakd_3d
-    model_path: /home/rokey/mini1_ws/yolov8n.pt
+    model_path: /home/rokey/mini1_ws/src/rc_car_bringup/models/robot_cam.pt
     device: auto
     target_class_name: car
-    confidence_threshold: 0.35
+    confidence_threshold: 0.45
     horizontal_fov_deg: 69.0
     inference_rate: 2.0
     depth_sample_radius: 4
+    publish_debug_image: false
+    publish_debug_compressed_image: false
     debug_image_topic: /rc_car/debug/oakd_image
     debug_compressed_image_topic: /rc_car/debug/oakd_image/compressed
 
@@ -73,6 +87,7 @@ nav2_target_tracker_node:
   ros__parameters:
     target_topic: /rc_car/target/oakd_3d
     enable_topic: /rc_car/nav2_tracking_enabled
+    return_topic: /rc_car/return_to_watch_area
     navigate_action: /robot3/navigate_to_pose
     map_frame: map
     robot_frame: base_link
@@ -83,3 +98,7 @@ nav2_target_tracker_node:
     target_timeout_sec: 1.0
     goal_update_period: 1.0
     goal_change_distance: 0.20
+    return_when_lost: true
+    return_missed_frames: 5
+    audio_topic: /robot3/cmd_audio
+    beep_on_tracking: true

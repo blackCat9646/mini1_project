@@ -72,10 +72,38 @@ def resolve_yolo_device(node, requested_device):
     return 'cpu'
 
 
+def class_ids_for_name(node, model, target_class_name):
+    """YOLO 모델에서 target class id 찾기."""
+    if model is None:
+        return None
+
+    names = getattr(model, 'names', {})
+    if isinstance(names, list):
+        names = dict(enumerate(names))
+    class_ids = []
+
+    for class_id, class_name in names.items():
+        if class_name == target_class_name:
+            class_ids.append(int(class_id))
+
+    if class_ids:
+        node.get_logger().info(
+            f'YOLO 대상 클래스: {target_class_name}, class id: {class_ids}'
+        )
+        return class_ids
+
+    node.get_logger().warn(
+        f'YOLO 대상 클래스 없음: {target_class_name}, 모델 클래스: {names}'
+    )
+    return None
+
+
 def biggest_box(result, target_class_name='rc_car'):
     """가장 큰 YOLO 박스 선택."""
     # class id와 class name 대응표
     names = result.names
+    if isinstance(names, list):
+        names = dict(enumerate(names))
 
     # 현재까지 가장 좋은 박스
     best = None

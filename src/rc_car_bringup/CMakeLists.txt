@@ -14,6 +14,7 @@ install(DIRECTORY
   docs
   launch
   maps
+  models
   rviz
   web
   DESTINATION share/${PROJECT_NAME}

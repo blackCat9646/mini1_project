@@ -24,14 +24,21 @@ class ApproachPlannerNode(Node):
         # 관찰 지점 waypoint 파일
         self.declare_parameter(
             'waypoint_file',
-            '/home/rokey/mini1_ws/src/rc_car_bringup/config/watch_area_waypoint.yaml',
+            '/home/rokey/mini1_ws/src/rc_car_bringup/config/'
+            'watch_area_waypoint.yaml',
         )
 
         # TurtleBot4 Nav2 action 이름
         self.declare_parameter('navigate_action', '/robot3/navigate_to_pose')
 
         # Nav2 기반 OAK-D 추적 켜기/끄기 토픽
-        self.declare_parameter('tracking_enable_topic', '/rc_car/nav2_tracking_enabled')
+        self.declare_parameter(
+            'tracking_enable_topic',
+            '/rc_car/nav2_tracking_enabled',
+        )
+
+        # OAK-D가 RC카를 잃었을 때 관찰 지점 복귀 요청 토픽
+        self.declare_parameter('return_topic', '/rc_car/return_to_watch_area')
 
         # goal 완료 후 trigger가 다시 false가 되었을 때 재출발 허용 여부
         self.declare_parameter('rearm_when_trigger_is_false', True)
@@ -39,7 +46,10 @@ class ApproachPlannerNode(Node):
         trigger_topic = self.get_parameter('trigger_topic').value
         waypoint_file = self.get_parameter('waypoint_file').value
         navigate_action = self.get_parameter('navigate_action').value
-        tracking_enable_topic = self.get_parameter('tracking_enable_topic').value
+        tracking_enable_topic = self.get_parameter(
+            'tracking_enable_topic'
+        ).value
+        return_topic = self.get_parameter('return_topic').value
 
         self._rearm_when_trigger_is_false = bool(
             self.get_parameter('rearm_when_trigger_is_false').value
@@ -55,18 +65,31 @@ class ApproachPlannerNode(Node):
         # 이전 trigger 상태
         self._last_trigger_value = False
 
-        self._action_client = ActionClient(self, NavigateToPose, navigate_action)
+        self._action_client = ActionClient(
+            self,
+            NavigateToPose,
+            navigate_action,
+        )
         self._tracking_enable_publisher = self.create_publisher(
             Bool,
             tracking_enable_topic,
             10,
         )
         self.create_subscription(Bool, trigger_topic, self._on_trigger, 10)
+        self.create_subscription(
+            Bool,
+            return_topic,
+            self._on_return_request,
+            10,
+        )
 
         self.get_logger().info(f'웹캠 trigger 토픽: {trigger_topic}')
+        self.get_logger().info(f'관찰 지점 복귀 요청 토픽: {return_topic}')
         self.get_logger().info(f'관찰 지점 waypoint 파일: {waypoint_file}')
         self.get_logger().info(f'Nav2 이동 action: {navigate_action}')
-        self.get_logger().info(f'OAK-D Nav2 추적 enable 토픽: {tracking_enable_topic}')
+        self.get_logger().info(
+            f'OAK-D Nav2 추적 enable 토픽: {tracking_enable_topic}'
+        )
 
     def _publish_tracking_enabled(self, enabled):
         """OAK-D Nav2 추적 시작/정지 신호 발행."""
@@ -93,7 +116,9 @@ class ApproachPlannerNode(Node):
 
         self.get_logger().info(
             '관찰 지점 로딩 완료: '
-            f"x={watch_area['x']:.2f}, y={watch_area['y']:.2f}, yaw={watch_area['yaw']:.2f}"
+            f"x={watch_area['x']:.2f}, "
+            f"y={watch_area['y']:.2f}, "
+            f"yaw={watch_area['yaw']:.2f}"
         )
         return watch_area
 
@@ -104,7 +129,11 @@ class ApproachPlannerNode(Node):
         # trigger false 시 다음 테스트 준비
         if not trigger_is_on:
             self._last_trigger_value = False
-            if self._rearm_when_trigger_is_false and not self._goal_in_progress:
+            can_rearm = (
+                self._rearm_when_trigger_is_false
+                and not self._goal_in_progress
+            )
+            if can_rearm:
                 self._goal_sent = False
             return
 
@@ -130,6 +159,22 @@ class ApproachPlannerNode(Node):
             self.get_logger().info('이미 관찰 지점 goal 전송 완료')
             return
 
+        self._send_watch_area_goal()
+
+    def _on_return_request(self, message):
+        """RC카 추적 실패 시 관찰 지점 복귀 처리."""
+        if not message.data:
+            return
+
+        if self._waypoint is None:
+            self.get_logger().error('관찰 지점 없음으로 복귀 불가')
+            return
+
+        if self._goal_in_progress:
+            self.get_logger().info('이미 관찰 지점 이동 중')
+            return
+
+        self.get_logger().info('RC카 추적 실패로 관찰 지점 복귀')
         self._send_watch_area_goal()
 
     def _send_watch_area_goal(self):

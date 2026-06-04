@@ -62,8 +62,12 @@ class FollowControllerNode(Node):
 
         self._desired_distance = self.get_parameter('desired_distance').value
         self._stop_distance = self.get_parameter('stop_distance').value
-        self._front_safety_distance = self.get_parameter('front_safety_distance').value
-        self._target_timeout_sec = self.get_parameter('target_timeout_sec').value
+        self._front_safety_distance = self.get_parameter(
+            'front_safety_distance'
+        ).value
+        self._target_timeout_sec = self.get_parameter(
+            'target_timeout_sec'
+        ).value
         self._max_linear_speed = self.get_parameter('max_linear_speed').value
         self._max_angular_speed = self.get_parameter('max_angular_speed').value
 
@@ -80,8 +84,14 @@ class FollowControllerNode(Node):
         self.get_logger().info(f'RC카 위치 구독 토픽: {target_topic}')
         self.get_logger().info(f'라이다 구독 토픽: {scan_topic}')
         self.get_logger().info(f'속도 명령 발행 토픽: {cmd_vel_topic}')
-        self.get_logger().info('추종 시작 명령: ros2 param set /follow_controller_node follow_enabled true')
-        self.get_logger().info('추종 정지 명령: ros2 param set /follow_controller_node follow_enabled false')
+        self.get_logger().info(
+            '추종 시작 명령: '
+            'ros2 param set /follow_controller_node follow_enabled true'
+        )
+        self.get_logger().info(
+            '추종 정지 명령: '
+            'ros2 param set /follow_controller_node follow_enabled false'
+        )
 
     def _on_target(self, target):
         # 최신 RC카 위치 저장
@@ -126,7 +136,8 @@ class FollowControllerNode(Node):
             return
 
         # 오래된 감지 또는 미감지 처리
-        target_is_old = time.monotonic() - self._last_target_time > self._target_timeout_sec
+        target_age = time.monotonic() - self._last_target_time
+        target_is_old = target_age > self._target_timeout_sec
         if target_is_old or not self._last_target.detected:
             self._stop()
             return

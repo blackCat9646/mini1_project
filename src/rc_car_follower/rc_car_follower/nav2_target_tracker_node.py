@@ -6,13 +6,15 @@
 
 출력:
   /robot3/navigate_to_pose        Nav2 이동 goal
+  /rc_car/return_to_watch_area    RC카 분실 시 관찰 지점 복귀 요청
 
 규칙:
   1. tracking_enabled가 false이면 Nav2 goal 전송 금지
   2. RC카가 보이면 RC카 앞 0.70m 지점까지 Nav2로 이동
   3. RC카가 너무 가까우면 진행 중인 Nav2 goal 취소
   4. RC카를 잃어버리면 진행 중인 Nav2 goal 취소
-  5. 실제 장애물 회피는 Nav2 costmap과 controller 담당
+  5. RC카 미감지 프레임이 누적되면 관찰 지점 복귀 요청
+  6. 실제 장애물 회피는 Nav2 costmap과 controller 담당
 """
 
 import math
@@ -20,7 +22,9 @@ import time
 
 import rclpy
 from action_msgs.msg import GoalStatus
+from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import PoseStamped
+from irobot_create_msgs.msg import AudioNote, AudioNoteVector
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -40,6 +44,7 @@ class Nav2TargetTrackerNode(Node):
         # 토픽과 action 이름
         self.declare_parameter('target_topic', '/rc_car/target/oakd_3d')
         self.declare_parameter('enable_topic', '/rc_car/nav2_tracking_enabled')
+        self.declare_parameter('return_topic', '/rc_car/return_to_watch_area')
         self.declare_parameter('navigate_action', '/robot3/navigate_to_pose')
 
         # 좌표계 이름
@@ -67,19 +72,50 @@ class Nav2TargetTrackerNode(Node):
         # goal 변화가 작을 때 재전송 방지 거리
         self.declare_parameter('goal_change_distance', 0.20)
 
+        # RC카 분실 시 관찰 지점 복귀 기준
+        self.declare_parameter('return_when_lost', True)
+        self.declare_parameter('return_missed_frames', 5)
+
+        # 추적 중 RC카 감지 알림음
+        self.declare_parameter('audio_topic', '/robot3/cmd_audio')
+        self.declare_parameter('beep_on_tracking', True)
+
         target_topic = self.get_parameter('target_topic').value
         enable_topic = self.get_parameter('enable_topic').value
+        return_topic = self.get_parameter('return_topic').value
         navigate_action = self.get_parameter('navigate_action').value
+        audio_topic = self.get_parameter('audio_topic').value
 
         self._map_frame = self.get_parameter('map_frame').value
         self._robot_frame = self.get_parameter('robot_frame').value
-        self._tracking_enabled = bool(self.get_parameter('tracking_enabled').value)
-        self._desired_distance = float(self.get_parameter('desired_distance').value)
+        self._tracking_enabled = bool(
+            self.get_parameter('tracking_enabled').value
+        )
+        self._desired_distance = float(
+            self.get_parameter('desired_distance').value
+        )
         self._stop_distance = float(self.get_parameter('stop_distance').value)
-        self._approach_margin = float(self.get_parameter('approach_margin').value)
-        self._target_timeout_sec = float(self.get_parameter('target_timeout_sec').value)
-        self._goal_change_distance = float(self.get_parameter('goal_change_distance').value)
-        goal_update_period = float(self.get_parameter('goal_update_period').value)
+        self._approach_margin = float(
+            self.get_parameter('approach_margin').value
+        )
+        self._target_timeout_sec = float(
+            self.get_parameter('target_timeout_sec').value
+        )
+        self._goal_change_distance = float(
+            self.get_parameter('goal_change_distance').value
+        )
+        goal_update_period = float(
+            self.get_parameter('goal_update_period').value
+        )
+        self._return_when_lost = bool(
+            self.get_parameter('return_when_lost').value
+        )
+        self._return_missed_frames = int(
+            self.get_parameter('return_missed_frames').value
+        )
+        self._beep_on_tracking = bool(
+            self.get_parameter('beep_on_tracking').value
+        )
 
         # 최신 RC카 위치
         self._last_target = None
@@ -90,10 +126,27 @@ class Nav2TargetTrackerNode(Node):
         self._cancel_in_progress = False
         self._pending_goal = None
         self._last_goal_xy = None
+        self._beep_published = False
+        self._missed_detection_count = 0
+        self._return_requested = False
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
-        self._action_client = ActionClient(self, NavigateToPose, navigate_action)
+        self._action_client = ActionClient(
+            self,
+            NavigateToPose,
+            navigate_action,
+        )
+        self._audio_publisher = self.create_publisher(
+            AudioNoteVector,
+            audio_topic,
+            10,
+        )
+        self._return_publisher = self.create_publisher(
+            Bool,
+            return_topic,
+            10,
+        )
 
         self.create_subscription(Target3D, target_topic, self._on_target, 10)
         self.create_subscription(Bool, enable_topic, self._on_enable, 10)
@@ -101,13 +154,31 @@ class Nav2TargetTrackerNode(Node):
 
         self.get_logger().info(f'RC카 위치 구독 토픽: {target_topic}')
         self.get_logger().info(f'추적 enable 토픽: {enable_topic}')
+        self.get_logger().info(f'관찰 지점 복귀 요청 토픽: {return_topic}')
         self.get_logger().info(f'Nav2 이동 action: {navigate_action}')
+        self.get_logger().info(f'추적 감지 알림음 토픽: {audio_topic}')
         self.get_logger().info(f'초기 Nav2 추적 상태: {self._tracking_enabled}')
 
     def _on_target(self, target):
         # 최신 RC카 위치 저장
         self._last_target = target
         self._last_target_time = time.monotonic()
+
+        if not self._tracking_enabled:
+            self._missed_detection_count = 0
+            return
+
+        if target.detected:
+            self._missed_detection_count = 0
+            return
+
+        self._missed_detection_count += 1
+        self.get_logger().info(
+            'RC카 미감지 프레임: '
+            f'{self._missed_detection_count}/{self._return_missed_frames}'
+        )
+        if self._missed_detection_count >= self._return_missed_frames:
+            self._request_watch_area_return()
 
     def _on_enable(self, message):
         # watch_area 도착 후 추적 시작
@@ -120,26 +191,29 @@ class Nav2TargetTrackerNode(Node):
             )
         ])
         self.get_logger().info(f'Nav2 추적 상태: {self._tracking_enabled}')
+        self._missed_detection_count = 0
+        self._return_requested = False
         if not self._tracking_enabled:
             self._cancel_current_goal()
+            self._beep_published = False
 
     def _tracking_loop(self):
         # 수동 파라미터 변경 반영
-        self._tracking_enabled = bool(self.get_parameter('tracking_enabled').value)
+        self._tracking_enabled = bool(
+            self.get_parameter('tracking_enabled').value
+        )
 
         if not self._tracking_enabled:
             return
 
-        if self._last_target is None:
+        if not self._target_is_fresh_and_detected():
             self._cancel_current_goal()
             return
 
-        target_is_old = time.monotonic() - self._last_target_time > self._target_timeout_sec
-        if target_is_old or not self._last_target.detected:
-            self._cancel_current_goal()
-            return
+        self._publish_tracking_beep()
 
-        if self._last_target.distance <= self._stop_distance + self._approach_margin:
+        stop_limit = self._stop_distance + self._approach_margin
+        if self._last_target.distance <= stop_limit:
             self._cancel_current_goal()
             return
 
@@ -151,6 +225,17 @@ class Nav2TargetTrackerNode(Node):
             return
 
         self._send_or_replace_goal(goal)
+
+    def _target_is_fresh_and_detected(self):
+        """최근 OAK-D target이 실제 감지인지 확인."""
+        if self._last_target is None:
+            return False
+
+        target_age = time.monotonic() - self._last_target_time
+        if target_age > self._target_timeout_sec:
+            return False
+
+        return bool(self._last_target.detected)
 
     def _make_follow_goal(self, target):
         """RC카 앞 0.70m 지점의 map goal 생성."""
@@ -299,6 +384,47 @@ class Nav2TargetTrackerNode(Node):
         self._pending_goal = None
         if next_goal is not None and self._tracking_enabled:
             self._send_goal(next_goal)
+
+    def _request_watch_area_return(self):
+        """RC카 분실 시 관찰 지점 복귀 요청."""
+        if not self._return_when_lost:
+            return
+
+        if self._return_requested:
+            return
+
+        self._return_requested = True
+        self._cancel_current_goal()
+
+        message = Bool()
+        message.data = True
+        self._return_publisher.publish(message)
+        self.get_logger().warn('RC카 분실로 관찰 지점 복귀 요청')
+
+    def _audio_note(self, frequency):
+        """짧은 알림음 하나 생성."""
+        note = AudioNote()
+        note.frequency = int(frequency)
+        note.max_runtime = Duration(sec=0, nanosec=300000000)
+        return note
+
+    def _publish_tracking_beep(self):
+        """추적 중 RC카가 처음 보일 때만 알림음 발행."""
+        if not self._beep_on_tracking:
+            return
+
+        if self._beep_published:
+            return
+
+        self._beep_published = True
+        sound = AudioNoteVector()
+        sound.notes = [
+            self._audio_note(880),
+            self._audio_note(440),
+            self._audio_note(880),
+            self._audio_note(440),
+        ]
+        self._audio_publisher.publish(sound)
 
 
 def main():
